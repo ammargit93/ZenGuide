@@ -2,11 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Menu, User, X } from 'lucide-react';
 import { GoogleAuthProvider, signInWithPopup, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../services/firebaseConfig';
-import { collection, addDoc, getDocs, query, orderBy, where, doc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, where, doc, getDoc } from 'firebase/firestore';
 import Signup from './Signup';
 
 const ChatbotUI = () => {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([]); // All messages in the sidebar
+  const [sessionMessages, setSessionMessages] = useState([]); // Current session messages
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -21,13 +22,12 @@ const ChatbotUI = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(scrollToBottom, [messages]);
+  useEffect(scrollToBottom, [sessionMessages]); // Scroll to bottom for session messages
 
   // Fetch conversation history from Firestore
   const fetchMessages = async () => {
-    if (!user) return; // Don't fetch if there's no user
     const messagesCollection = collection(db, 'messages');
-    const q = query(messagesCollection, where('user', '==', user.email), orderBy('timestamp', 'asc'));
+    const q = query(messagesCollection, orderBy('timestamp', 'asc')); // Fetch all messages
     const querySnapshot = await getDocs(q);
     const fetchedMessages = [];
     querySnapshot.forEach((doc) => {
@@ -40,7 +40,7 @@ const ChatbotUI = () => {
   const handleSend = async () => {
     if (input.trim()) {
       const userMessage = { text: input, user: user.email, timestamp: new Date() };
-      setMessages((prev) => [...prev, userMessage]);
+      setSessionMessages((prev) => [...prev, userMessage]); // Add user message to session
       setIsTyping(true);
 
       try {
@@ -56,25 +56,24 @@ const ChatbotUI = () => {
         const botResponse = data['response'];
         const botMessage = {
           text: botResponse,
-          user: 'Chatbot',
+          user: user.displayName,
           timestamp: new Date(),
-          userEmail: user.email, // Include the currently logged-in user's email
+          userEmail: user.email,
+          userQuery: userMessage.text,
         };
 
-        // Add user and bot messages to Firestore
-        await addDoc(collection(db, 'messages'), userMessage);
-        await addDoc(collection(db, 'messages'), botMessage);
+        await addDoc(collection(db, 'messages'), botMessage); // Save bot message to Firestore
 
         setTimeout(() => {
           setIsTyping(false);
-          setMessages((prev) => [...prev, botMessage]);
+          setSessionMessages((prev) => [...prev, botMessage]); // Add bot response to session
         }, 1000);
       } catch (error) {
         setIsTyping(false);
-        setMessages((prev) => [...prev, { text: 'Oops! Something went wrong. Please try again.', user: 'Chatbot' }]);
+        setSessionMessages((prev) => [...prev, { text: 'Oops! Something went wrong. Please try again.', user: user.displayName }]);
       }
 
-      setInput('');
+      setInput(''); // Clear input field
     }
   };
 
@@ -83,12 +82,23 @@ const ChatbotUI = () => {
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(auth, provider);
+      const user = result.user;
       setUser({
-        displayName: result.user.displayName,
-        email: result.user.email,
-        photoURL: result.user.photoURL,
+        displayName: user.displayName,
+        email: user.email,
+        photoURL: user.photoURL,
       });
       setIsAuthenticated(true);
+
+      // Save user information to Firestore if it doesn't already exist
+      const userDocRef = doc(db, 'users', user.email);
+      const userDoc = await getDoc(userDocRef);
+      if (!userDoc.exists()) {
+        await addDoc(collection(db, 'users'), {
+          email: user.email,
+          displayName: user.displayName,
+        });
+      }
     } catch (error) {
       console.error("Error signing in with Google:", error);
     }
@@ -98,6 +108,7 @@ const ChatbotUI = () => {
     await signOut(auth);
     setUser(null);
     setIsAuthenticated(false);
+    setSessionMessages([]); // Clear session messages on sign out
   };
 
   // Function to handle user signup
@@ -144,7 +155,7 @@ const ChatbotUI = () => {
 
   useEffect(() => {
     fetchMessages(); // Fetch messages when component mounts
-  }, [user]); // Fetch messages when the user changes
+  }, []); // Only fetch messages once
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
@@ -158,24 +169,11 @@ const ChatbotUI = () => {
       } else {
         setUser(null);
         setIsAuthenticated(false);
+        setSessionMessages([]); // Clear session messages on sign out
       }
     });
     return () => unsubscribe();
   }, []);
-
-  const toggleSidebar = () => {
-    setIsSidebarOpen(!isSidebarOpen);
-  };
-
-  const handleSignupSuccess = (user) => {
-    setUser({
-      displayName: user.displayName,
-      email: user.email,
-      photoURL: user.photoURL,
-    });
-    setIsAuthenticated(true);
-    setShowSignup(false);
-  };
 
   return (
     <div className="fixed inset-0 flex bg-gray-50">
@@ -184,15 +182,15 @@ const ChatbotUI = () => {
         {/* Close Button */}
         <div className="flex justify-between items-center p-4">
           <h2 className="text-lg font-semibold">Conversation History</h2>
-          <button onClick={toggleSidebar} className="p-1 rounded-full hover:bg-gray-600">
-            <X className="h-6 w-6 text-white" /> {/* Close icon */}
+          <button onClick={() => setIsSidebarOpen(false)} className="p-1 rounded-full hover:bg-gray-600">
+            <X className="h-6 w-6 text-white" />
           </button>
         </div>
         {/* Display Conversation History */}
-        <div className="overflow-y-auto h-96">
-          {messages.map((msg, index) => (
-            <div key={index} className={`my-2 ${msg.user === user.email ? 'text-right' : 'text-left'}`}>
-              <span className={`inline-block p-2 rounded-lg ${msg.user === user.email ? 'bg-blue-500 text-white' : 'bg-gray-300 text-black'}`}>
+        <div className="overflow-y-auto h-full pb-20">
+          {messages.filter(msg => msg.userEmail === user?.email).map((msg, index) => ( // Filter messages for the logged-in user
+            <div key={index} className={`my-2 px-4 text-left`}>
+              <span className={`inline-block p-2 rounded-lg bg-gray-300 text-black`}>
                 {msg.text}
               </span>
             </div>
@@ -206,7 +204,7 @@ const ChatbotUI = () => {
         <header className="bg-white shadow-md z-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
             <div className="flex items-center">
-              <button onClick={toggleSidebar} className="p-1 rounded-full hover:bg-gray-200">
+              <button onClick={() => setIsSidebarOpen(true)} className="p-1 rounded-full hover:bg-gray-200">
                 <Menu className="h-6 w-6 text-gray-500" />
               </button>
               <h1 className="ml-3 text-xl font-semibold text-gray-800">ZenGuide</h1>
@@ -221,34 +219,25 @@ const ChatbotUI = () => {
                   <span className="text-gray-600">{user.displayName}</span>
                 </div>
               )}
-              {!isAuthenticated && (
-                <button onClick={() => setShowSignup(!showSignup)} className="p-2 rounded-full bg-gray-200 hover:bg-gray-300">
-                  Sign Up
-                </button>
-              )}
             </div>
           </div>
         </header>
 
-        {/* Signup Form */}
-        {showSignup && (
-          <div>
-            <Signup onSignup={handleSignup} />
-            <p className="text-red-500">{signupMessage}</p>
-          </div>
-        )}
-
         {/* Chat area */}
-        <div className="flex-1 flex flex-col p-4">
-          <div className="flex-1 overflow-y-auto">
-            {messages.map((msg, index) => (
-              <div key={index} className={`my-2 ${msg.user === user.email ? 'text-right' : 'text-left'}`}>
-                <span className={`inline-block p-2 rounded-lg ${msg.user === user.email ? 'bg-blue-500 text-white' : 'bg-gray-300 text-black'}`}>
+        <div className="flex-grow flex flex-col p-4 overflow-y-auto">
+          <div className="flex-grow">
+            {sessionMessages.map((msg, index) => (
+              <div key={index} className={`my-2 ${msg.user === user?.displayName ? 'text-left' : 'text-right  '}`}>
+                <span className={`inline-block p-2 rounded-lg ${msg.user === user?.displayName ? 'bg-blue-500 text-white' : 'bg-gray-200 text-black'}`}>
                   {msg.text}
                 </span>
               </div>
             ))}
-            {isTyping && <div className="text-left">Typing...</div>}
+            {isTyping && (
+              <div className="my-2 text-left">
+                <span className="inline-block p-2 rounded-lg bg-gray-300 text-black">Typing...</span>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 
@@ -258,15 +247,33 @@ const ChatbotUI = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              className="flex-1 border rounded-lg p-2"
-              placeholder="Type a message..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSend();
+                  setInput('');
+                   // CLear the input area after an Enter keypress
+                }
+              }}
+              placeholder="Type your message..."
+              className="flex-grow p-2 border rounded-l-md"
             />
-            <button onClick={handleSend} className="ml-2 p-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600">
+            <button onClick={handleSend} className="p-2 bg-blue-500 text-white rounded-r-md">
               <Send />
             </button>
           </div>
+
         </div>
       </div>
+
+      {/* Signup Modal */}
+      {showSignup && (
+        <Signup
+          onClose={() => setShowSignup(false)}
+          onSignup={handleSignup}
+          onLogin={handleLogin}
+          signupMessage={signupMessage}
+        />
+      )}
     </div>
   );
 };

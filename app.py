@@ -16,7 +16,7 @@ app = FastAPI()
 # Allow CORS requests from your React app
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # React's port
+    allow_origins=["https://66fd5c10f77d7b0c45163fa3--jocular-gumdrop-752e3b.netlify.app"],  # React's port
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -212,9 +212,8 @@ def process(text):
     return new_text
 
 
-public_url = ngrok.connect(8000)
-print("Public URL:", public_url)
+# public_url = ngrok.connect(8000)
+# print("Public URL:", public_url)
 
-# Run Uvicorn (ASGI server)
 if __name__ == "__main__":
-    uvicorn.run(app, host='0.0.0.0', port=8000)
+    uvicorn.run(app, host='localhost', port=8000)

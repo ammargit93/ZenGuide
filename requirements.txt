@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+huggingface-hub
+pymongo
+python-dotenv
+pyngrok
+gensim
+numpy
+scipy
